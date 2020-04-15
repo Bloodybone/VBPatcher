@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "VBPatcher": {
-      "commandName": "Project",
-      "commandLineArgs": "C:\\Users\\Bloodybone\\Desktop\\voicemeeter8x64.exe"
-    }
-  }
-}
