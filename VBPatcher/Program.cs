@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Contracts;
 using System.IO;
 using System.Linq;
 
@@ -14,11 +15,9 @@ namespace VBPatcher
 
         private static byte[] _source { get; set; }
 
-        private static byte[] _pattern { get; set; }
-
         private static bool _32bit { get; set; }
 
-        private static string FilePathToAppend { get; set; }
+        private static string FileName { get; set; }
 
         private static int Patchsuccessnum { get; set; }
 
@@ -28,14 +27,17 @@ namespace VBPatcher
 
             public string PatchBytes;
 
+            public string Mask;
+
             public string PatchNumber;
 
             public int PatchOffset;
 
-            public PatchInfo(string pattern, string patchBytes, string patchNumber, int patchOffset)
+            public PatchInfo(string pattern, string patchBytes, string mask, string patchNumber, int patchOffset)
             {
                 Pattern = pattern;
                 PatchBytes = patchBytes;
+                Mask = mask;
                 PatchNumber = patchNumber;
                 PatchOffset = patchOffset;
             }
@@ -45,8 +47,18 @@ namespace VBPatcher
         {
             if (args.Length > 0)
             {
+                switch (args[0].ToLower())
+                {
+                    case "-h":
+                    case "-help":
+                    case "-?":
+                        DisplayHelp();
+                        Console.ReadLine();
+                        return;
+                }
+
                 Filepath = args[0];
-                FilePathToAppend = args[0].Split(@"\")[^1];
+                FileName = args[0].Split(@"\")[^1];
 
                 switch (PeArchitecture())
                 {
@@ -75,7 +87,13 @@ namespace VBPatcher
                 }
             }
             else
-                InitData();
+            {
+                DisplayHelp();
+
+                Console.ReadLine();
+
+                return;
+            }
 
             Console.WriteLine("Creating Backup...");
 
@@ -91,18 +109,10 @@ namespace VBPatcher
                     return;
             }
 
-            if (!OpenFileForReadAccess())
-            {
-                Console.WriteLine("Error while trying to Open the File!");
-
-                Console.ReadLine();
-
+            if (!SetUpSource())
                 return;
-            }
 
-            SetUpSource();
-
-            List<PatchInfo> lPInfo = GetPatchesForFileVersion();
+            List<PatchInfo> lPInfo = GetPatches();
             if (lPInfo == null || lPInfo.Count <= 0)
             {
                 Console.WriteLine("Unknown Error while trying to get Patches!");
@@ -113,7 +123,7 @@ namespace VBPatcher
 
             foreach (PatchInfo pInfo in lPInfo)
             {
-                PatternScanAndPatch(pInfo.Pattern, pInfo.PatchBytes, pInfo.PatchNumber, pInfo.PatchOffset);
+                PatternScanAndPatch(pInfo.Pattern, pInfo.PatchBytes, pInfo.Mask, pInfo.PatchNumber, pInfo.PatchOffset);
             }
 
             if (Patchsuccessnum >= lPInfo.Count)
@@ -124,21 +134,16 @@ namespace VBPatcher
             Console.ReadLine();
         }
 
-        private static int PatternAt(byte[] source, byte[] pattern)
+        private static int PatternScan(byte[] source, byte[] pattern, string mask)
         {
-            for (int i = 0; i < source.Length; i++)
+            if (pattern.Length != mask.Length)
             {
-                if (source.Skip(i).Take(pattern.Length).SequenceEqual(pattern))
-                {
-                    return i;
-                }
+                Console.WriteLine("Internal Error! Error Code:0x1");
+
+                Console.ReadLine();
+
+                Environment.Exit(1);
             }
-
-            return -1;
-        }
-
-        private static int PatternAtPlaceHolder(byte[] source, byte[] pattern)
-        {
             for (int i = 0; i < source.Length; i++)
             {
                 bool nomatch = false;
@@ -147,9 +152,7 @@ namespace VBPatcher
                     continue;
                 for (int j = 0; j < pattern.Length && i + j < source.Length; j++)
                 {
-                    if (pattern[j] == 0x0)
-                        continue;
-                    if (pattern[j] != source[i + j])
+                    if (pattern[j] != source[i + j] && mask[j] == 'x')
                     {
                         nomatch = true;
                         break;
@@ -163,38 +166,16 @@ namespace VBPatcher
             return -1;
         }
 
-        private static void InitData()
+        private static void DisplayHelp()
         {
-
-            Console.WriteLine("Patch x86(32-Bit Version) or x64(64-Bit Version)? [86/64]");
-
-            if (Console.ReadLine().Contains("86"))
-            {
-                _32bit = true;
-                Console.WriteLine("x86 Mode Selected");
-            }
-            else
-            {
-                _32bit = false;
-                Console.WriteLine("x64 Mode Selected");
-            }
-
-            Console.WriteLine("Input VoiceMeeter Installation Directory \nExample: \"C:\\Program Files (x86)\\VB\\Voicemeeter\"");
-
-            if (_32bit)
-                FilePathToAppend = @"\voicemeeter8.exe";
-            else
-                FilePathToAppend = @"\voicemeeter8x64.exe";
-
-            Filepath = Console.ReadLine() + FilePathToAppend;
-
+            Console.WriteLine("Usage; \"VBPather.exe [FilePath]\"\nFilePath: FilePath to the voicemeeter8/x64 to Patch");
         }
 
         private static bool CreateBackup()
         {
             try
             {
-                File.Copy(Filepath, Filepath[0..^FilePathToAppend.Length] + FilePathToAppend + ".bkp");
+                File.Copy(Filepath, Filepath[0..^FileName.Length] + FileName + ".bkp");
 
                 return true;
             }
@@ -223,27 +204,24 @@ namespace VBPatcher
 
         }
 
-        private static void SetUpSource()
+        private static bool SetUpSource()
         {
+            if (!OpenFileForReadAccess())
+            {
+                Console.WriteLine("Error while trying to Open the File!");
+
+                Console.ReadLine();
+
+                return false;
+            }
+
             _source = new byte[file.Length];
 
             file.Read(_source, 0, (int)file.Length);
 
             file.Close();
-        }
 
-        private static void NewPattern(string pstring)
-        {
-            string[] pstringsplit = pstring.Split(" ");
-
-            _pattern = new byte[pstringsplit.Length];
-
-            for (int i = 0; i < pstringsplit.Length; i++)
-            {
-                byte value = Byte.Parse(pstringsplit[i], System.Globalization.NumberStyles.HexNumber);
-
-                _pattern[i] = value;
-            }
+            return true;
         }
 
         private static byte[] PatternConvert(string pattern)
@@ -263,14 +241,9 @@ namespace VBPatcher
             return convertedArray.ToArray();
         }
 
-        private static int FindFileOffset()
+        private static int FindFileOffset(string pattern, string mask)
         {
-            return PatternAt(_source, _pattern);
-        }
-
-        private static int FindFileOffsetPlaceHolder()
-        {
-            return PatternAtPlaceHolder(_source, _pattern);
+            return PatternScan(_source, PatternConvert(pattern), mask);
         }
 
         private static bool WritePatch(string PatchBytes, int FileOffset)
@@ -298,31 +271,22 @@ namespace VBPatcher
             }
         }
 
-        private static bool PatternScanAndPatch(string pattern, string patch, string patchnum, int offset)
+        private static bool PatternScanAndPatch(string pattern, string patch, string mask, string patchnum, int offset)
         {
 
             int pat;
-            if (pattern.Contains("?"))
-            {
-                _pattern = PatternConvert(pattern);
 
-                pat = FindFileOffsetPlaceHolder();
-            }
-            else
-            {
-                NewPattern(pattern);
-                pat = FindFileOffset();
-            }
+            pat = FindFileOffset(pattern, mask);
 
             if (pat > 0)
             {
                 pat += offset;
 
-                Console.WriteLine($"Valid Pattern Found at 0x{pat.ToString("X")}, Writing to File...");
+                Console.WriteLine($"Valid Pattern Found at 0x{pat:X}, Writing to File...");
 
                 if (WritePatch(patch, pat))
                 {
-                    Console.WriteLine($"Patch { patchnum } at File Offset: 0x{ pat.ToString("X") } was Successfull");
+                    Console.WriteLine($"Patch { patchnum } at File Offset: 0x{ pat:X} was Successfull");
 
                     Patchsuccessnum++;
 
@@ -330,7 +294,7 @@ namespace VBPatcher
                 }
                 else
                 {
-                    Console.WriteLine($"Error while trying to Patch the instruction at File Offset 0x{ pat.ToString("X") }!");
+                    Console.WriteLine($"Error while trying to Patch the instruction at File Offset 0x{ pat:X}!");
                 }
             }
             else
@@ -384,7 +348,7 @@ namespace VBPatcher
             return FileVersionInfo.GetVersionInfo(filepath).FileVersion;
         }
 
-        private static List<PatchInfo> GetPatchesForFileVersion()
+        private static List<PatchInfo> GetPatches()
         {
             List<PatchInfo> patches = new List<PatchInfo>();
 
@@ -404,10 +368,10 @@ namespace VBPatcher
                 {
                     default: // Tested on File Version 3.0.1.0
                         Console.WriteLine(@"Using Patches for File Version 3.0.1.0 / 32-bit");
-                        patches.Add(new PatchInfo("FF D6 ? ? ? ? ? ? ? ? ? ? ? ? ? ? E9", "EB 0C", "one", 2));
-                        patches.Add(new PatchInfo("08 83 3D ? ? ? ? 00 0F 85", "90 E9", "two", 8));
-                        patches.Add(new PatchInfo("81 FA ? ? ? ? 76", "EB", "three", 6));
-                        patches.Add(new PatchInfo("F6 05 ? ? ? ? 1F 0F 85", "90 E9", "four", 7));
+                        patches.Add(new PatchInfo("FF D6 ? ? ? ? ? ? ? ? ? ? ? ? ? ? E9", "EB 0C", "xx??????????????x", "one", 2));
+                        patches.Add(new PatchInfo("08 83 3D ? ? ? ? 00 0F 85", "90 E9", "xxx????xxx", "two", 8));
+                        patches.Add(new PatchInfo("81 FA ? ? ? ? 76", "EB", "xx????x", "three", 6));
+                        patches.Add(new PatchInfo("F6 05 ? ? ? ? 1F 0F 85", "90 E9", "xx????xxx", "four", 7));
                         break;
                 }
             }
@@ -417,10 +381,10 @@ namespace VBPatcher
                 {
                     default: // Tested on File Version 3.0.1.0
                         Console.WriteLine(@"Using Patches for File Version 3.0.1.0 / 64-bit");
-                        patches.Add(new PatchInfo("B8 ? ? ? ? 48 8B CB FF 15 ? ? ? ? E9", "EB 04", "one", 8));
-                        patches.Add(new PatchInfo("CE FF 15 ? ? ? ? 83 3D ? ? ? ? 00 0F 85", "90 E9", "two", 14));
-                        patches.Add(new PatchInfo("76 ? FF 15 ? ? ? ? 45 33", "EB", "three", 0));
-                        patches.Add(new PatchInfo("F6 05 ? ? ? ? 1F 0F 85", "90 E9", "four", 7));
+                        patches.Add(new PatchInfo("B8 ? ? ? ? 48 8B CB FF 15 ? ? ? ? E9", "EB 04", "x????xxxxx????x", "one", 8));
+                        patches.Add(new PatchInfo("CE FF 15 ? ? ? ? 83 3D ? ? ? ? 00 0F 85", "90 E9", "xxx????xx????xxx", "two", 14));
+                        patches.Add(new PatchInfo("76 ? FF 15 ? ? ? ? 45 33", "EB", "x?xx????xx", "three", 0));
+                        patches.Add(new PatchInfo("F6 05 ? ? ? ? 1F 0F 85", "90 E9", "xx????xxx","four", 7));
                         break;
                 }
             }
