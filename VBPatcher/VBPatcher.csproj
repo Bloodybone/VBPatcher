@@ -9,6 +9,7 @@
     <Authors>Bloodybone</Authors>
     <Company>Bloodybone</Company>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <Platforms>AnyCPU;x86</Platforms>
   </PropertyGroup>
 
   <ItemGroup>
